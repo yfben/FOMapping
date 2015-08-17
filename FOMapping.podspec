@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name = 'FOMapping'
-  s.version = '1.0.1'
+  s.version = '1.0.2'
   s.summary = 'A simple ORM extension of FMDB.'
   s.homepage = 'https://github.com/yfben/FOMapping'
   s.license = { :type => 'MIT', :file => 'LICENSE' }

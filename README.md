@@ -1,7 +1,7 @@
 FOMapping
 =======
 
-A simple ORM(Object-Relational-Mapping) extension of [ccgus](https://github.com/ccgus)'s fantastic SQLite  Objective-C wrapper [FMDB](https://github.com/ccgus/fmdb). [FMDB](https://github.com/ccgus/fmdb) is awesome, but it's more convenient to have some object instances to represent what we have in the database.
+A simple ORM(Object-Relational-Mapping) extension of [ccgus](https://github.com/ccgus)'s SQLite Objective-C wrapper [FMDB](https://github.com/ccgus/fmdb). [FMDB](https://github.com/ccgus/fmdb) is awesome, but it's more convenient to have some object instances to represent what we have in the database.
 
 ## Beta status
 I develop my iOS Apps with this project when I have to deal with SQLite. If you come accross any problems. Please let me know.
