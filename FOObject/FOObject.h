@@ -6,9 +6,7 @@
 //  Copyright (c) 2015年 tradevan. All rights reserved.
 //
 
-#import <Foundation/Foundation.h>
-#import "FMDatabase.h"
-
+#import <FMDB/FMDB.h>
 
 @protocol FOObject
 
@@ -46,11 +44,12 @@
  }
  @endcode
  @param rs
- An FMResultSet object containing the query result.
+ An array of containing the query result with type FOObjects.
  @return An instance of FOObject.
  */
-+(instancetype)objectWithResultSet:(FMResultSet *)rs;
++(NSArray *)objectsFromResultSet:(FMResultSet *)rs;
 
++(NSArray *)customObjectsFromResultSet:(FMResultSet *)rs class:(Class)objClass;
 
 /*!
  Create an instance of NSDictionary to store a temporary query result which does not have a corresponding class by using an FMResultSet object. This dictionary will not contain any NSDate object because there is no way to learn whether a column value is for date or not.
@@ -64,32 +63,20 @@
  }
  @endcode
  @param rs
- An FMResultSet object containing the query result.
+ An array of containing the query result with type NSDictionary.
  @return An instance of FOObject.
  */
-+(NSDictionary *)dictionaryWithResultSet:(FMResultSet *)rs;
++(NSArray *)dictionariesFromResultSet:(FMResultSet *)rs;
 
 
 /*!
- Insert a row with the receiver's properties into the corresponding table in a given database connection.
- @see -(BOOL)update:(FMDatabase *)db;
+ Persists a row with the receiver's properties in the corresponding table in a given database connection.
  @see -(BOOL)remove:(FMDatabase *)db;
  @param db
  An FMDatabase connection.
  @return YES upon success; NO upon failure.
  */
--(BOOL)save:(FMDatabase *)db;
-
-
-/*!
- Update the row with the receiver's properties in the corresponding table in a given database connection.
- @see -(BOOL)save:(FMDatabase *)db;
- @see -(BOOL)remove:(FMDatabase *)db;
- @param db
- An FMDatabase connection.
- @return YES upon success; NO upon failure.
- */
--(BOOL)update:(FMDatabase *)db;
+-(BOOL)persist:(FMDatabase *)db;
 
 
 /*!

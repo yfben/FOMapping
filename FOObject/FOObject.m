@@ -7,8 +7,8 @@
 //
 
 #import <objc/message.h>
+#import <sqlite3.h>
 #import "FOObject.h"
-
 
 @interface FOObject() {
     
@@ -26,58 +26,42 @@
     @throw exception;
 }
 
-static NSArray *_pks = NULL;
 +(NSArray *)pks:(FMDatabase *)db {
     
-    static dispatch_once_t onceToken;
+    Class selfClass = [self class];
+    NSString *tableName = [selfClass tableName];
     
-    dispatch_once(&onceToken, ^{
+    FMResultSet *rs = [db executeQuery:[NSString stringWithFormat:@"pragma table_info(%@);", tableName]];
+    
+    NSMutableArray *result = [[NSMutableArray alloc] init];
+    while ([rs next]) {
         
-        Class selfClass = [self class];
-        NSString *tableName = [selfClass tableName];
+        NSString *colName = [rs stringForColumn:@"name"];
         
-        if (![db open]) {
+        if (!class_getProperty(selfClass, [colName UTF8String])) {
             
-            NSString *reason = [NSString stringWithFormat:@"Fail to open database at path:%@.", db.databasePath];
-            NSException* exception = [NSException exceptionWithName:@"FailToOpenDBException"
+            NSString *reason = [NSString stringWithFormat:@"Property '%@' not found in class %@.", colName, NSStringFromClass(selfClass)];
+            NSException* exception = [NSException exceptionWithName:@"PropertyNotFoundException"
                                                              reason:reason userInfo:nil];
             @throw exception;
         }
         
-        FMResultSet *rs = [db executeQuery:[NSString stringWithFormat:@"pragma table_info(%@);", tableName]];
-        
-        NSMutableArray *pks = [[NSMutableArray alloc] init];
-        while ([rs next]) {
+        if ([rs boolForColumn:@"pk"]) {
             
-            NSString *colName = [rs stringForColumn:@"name"];
-            
-            if (!class_getProperty(selfClass, [colName UTF8String])) {
-                
-                NSString *reason = [NSString stringWithFormat:@"Property '%@' not found in class %@.", colName, NSStringFromClass(selfClass)];
-                NSException* exception = [NSException exceptionWithName:@"PropertyNotFoundException"
-                                                                 reason:reason userInfo:nil];
-                @throw exception;
-            }
-            
-            if ([rs boolForColumn:@"pk"]) {
-                
-                [pks addObject:colName];
-            }
+            [result addObject:colName];
         }
-        
-        if (pks.count < 1) {
-            
-            NSString *reason = [NSString stringWithFormat:@"%@ should have at least 1 primary key.", tableName];
-            NSException* exception = [NSException exceptionWithName:@"PrimaryKeyNotFoundException"
-                                                             reason:reason userInfo:nil];
-            @throw exception;
-            
-        }
-        
-        _pks = [pks copy];
-    });
+    }
     
-    return _pks;
+    if (result.count < 1) {
+        
+        NSString *reason = [NSString stringWithFormat:@"%@ should have at least 1 primary key.", tableName];
+        NSException* exception = [NSException exceptionWithName:@"PrimaryKeyNotFoundException"
+                                                         reason:reason userInfo:nil];
+        @throw exception;
+        
+    }
+    
+    return [result copy];
 }
 
 
@@ -93,13 +77,21 @@ typedef NS_ENUM(NSInteger, FOPropertyType) {
     NSString *propertyAttrsString = [NSString stringWithUTF8String:property_getAttributes(property)];
     NSString *typeString = [propertyAttrsString componentsSeparatedByString:@","].firstObject;
     
-    // NSInteger or NSUInteger
-    if ([typeString isEqualToString:@"Ti"] || [typeString isEqualToString:@"TI"]) {
+    // NSInteger(Ti, Tq), NSUInteger(TI, TQ)
+    if ([typeString isEqualToString:@"Ti"]
+        ||[typeString isEqualToString:@"Tq"]
+        || [typeString isEqualToString:@"TI"]
+        || [typeString isEqualToString:@"TQ"]) {
         
         return FOPropertyTypeNumber;
     }
-    // double or float
-    else if ([typeString isEqualToString:@"Td"] || [typeString isEqualToString:@"Tf"]) {
+    // BOOL(Tc, TB)
+    else if ([typeString isEqualToString:@"Tc"] || [typeString isEqualToString:@"TB"]) {
+        
+        return FOPropertyTypeNumber;
+    }
+    // double
+    else if ([typeString isEqualToString:@"Td"]) {
         
         return FOPropertyTypeNumber;
     }
@@ -121,14 +113,18 @@ typedef NS_ENUM(NSInteger, FOPropertyType) {
     else {
         
         NSString *reason = [NSString stringWithFormat:@"FOPropertyType cannot be determined."];
-        NSException* exception = [NSException exceptionWithName:@"FOPropertyTypeNotDeterminedException"
+        NSException* exception = [NSException exceptionWithName:@"InvalidFOPropertyTypeException"
                                                          reason:reason userInfo:nil];
         @throw exception;
     }
 }
 
-+(instancetype)objectWithResultSet:(FMResultSet *)rs {
++(NSArray *)objectsFromResultSet:(FMResultSet *)rs {
     
+    NSMutableArray *objects = [NSMutableArray array];
+    
+    while ([rs next]) {
+        
         id object = [[[self class] alloc] init];
         
         int columnCount = sqlite3_column_count(rs.statement.statement);
@@ -160,28 +156,107 @@ typedef NS_ENUM(NSInteger, FOPropertyType) {
         }
         
         [object sync];
-    
-    return object;
-}
-
-+(NSDictionary *)dictionaryWithResultSet:(FMResultSet *)rs {
-    
-    NSMutableDictionary *dict = [[NSMutableDictionary alloc] init];
-    
-    int columnCount = sqlite3_column_count(rs.statement.statement);
-    
-    for (int i = 0; i < columnCount; i++) {
-        
-        // if NULL for this column
-        if ([rs columnIndexIsNull:i]) {
-            
-            continue;
-        }
-        
-        [dict setObject:[rs objectForColumnIndex:i] forKey:[rs columnNameForIndex:i]];
+        [objects addObject:object];
     }
     
-    return [dict copy];
+    return (objects.count) ? (objects) : (nil);
+}
+
++(NSArray *)customObjectsFromResultSet:(FMResultSet *)rs class:(Class)objClass {
+    
+    NSMutableArray *objects = [NSMutableArray array];
+    
+    while ([rs next]) {
+        
+        id object = [[objClass alloc] init];
+        
+        int columnCount = sqlite3_column_count(rs.statement.statement);
+        
+        for (int i = 0; i < columnCount; i++) {
+            
+            // if NULL for this column
+            if ([rs columnIndexIsNull:i]) {
+                
+                continue;
+            }
+            
+            NSString *columnName = [rs columnNameForIndex:i];
+            
+            objc_property_t property = class_getProperty(objClass, [columnName UTF8String]);
+            
+            id columnValue = [rs objectForColumnIndex:i];
+            
+            // NSDate
+            if ([self typeOfProperty:property] == FOPropertyTypeDate) {
+                
+                [object setValue:[rs dateForColumnIndex:i] forKey:columnName];
+            }
+            // other types(classes)
+            else {
+                
+                [object setValue:columnValue forKey:columnName];
+            }
+        }
+        
+        [objects addObject:object];
+    }
+    
+    return (objects.count) ? (objects) : (nil);
+}
+
++(NSArray *)dictionariesFromResultSet:(FMResultSet *)rs {
+    
+    NSMutableArray *dics = [NSMutableArray array];
+    while ([rs next]) {
+        
+        NSMutableDictionary *dic = [[NSMutableDictionary alloc] init];
+        
+        int columnCount = sqlite3_column_count(rs.statement.statement);
+        
+        for (int i = 0; i < columnCount; i++) {
+            
+            // if NULL for this column
+            if ([rs columnIndexIsNull:i]) {
+                
+                continue;
+            }
+            
+            [dic setObject:[rs objectForColumnIndex:i] forKey:[rs columnNameForIndex:i]];
+        }
+        
+        [dics addObject:dic];
+    }
+    
+    return (dics.count) ? ([dics copy]) : (nil);
+}
+
+-(void)loadPersistentObj:(FMDatabase *)db {
+    
+    Class selfClass = [self class];
+    NSMutableString *sql = [NSMutableString stringWithFormat:@"select * from %@", [selfClass tableName]];
+    NSMutableArray *args = [[NSMutableArray alloc] init];
+    
+    NSArray *pkNames = [selfClass pks:db];
+    for (NSUInteger i = 0 ; i < pkNames.count ; i++) {
+        
+        NSString *pkName = [pkNames objectAtIndex:i];
+        [args addObject:[self valueForKey:pkName]];
+        
+        if (i == 0) {
+            
+            [sql appendFormat:@" where %@=?", pkName];
+        }
+        else if (i < pkNames.count - 1) {
+            
+            [sql appendFormat:@" and %@=?", pkName];
+        }
+        else {
+            [sql appendFormat:@" and %@=?;", pkName];
+        }
+    }
+    
+    FMResultSet *rs = [db executeQuery:[sql copy] withArgumentsInArray:[args copy]];
+    _persistentObj = [[selfClass objectsFromResultSet:rs] firstObject];
 }
 
 -(BOOL)update:(FMDatabase *)db {
@@ -195,7 +270,15 @@ typedef NS_ENUM(NSInteger, FOPropertyType) {
     for (NSUInteger i = 0 ; i < changedProps.count ; i++) {
         
         NSString *propName = [changedProps objectAtIndex:i];
-        [args addObject:[self valueForKey:propName]];
+        id propValue = [self valueForKey:propName];
+        
+        if (propValue) {
+            [args addObject:propValue];
+        }
+        else {
+            [args addObject:[NSNull null]];
+        }
+        
         
         if (i == 0) {
             
@@ -236,7 +319,7 @@ typedef NS_ENUM(NSInteger, FOPropertyType) {
     return result;
 }
 
--(BOOL)save:(FMDatabase *)db {
+-(BOOL)insert:(FMDatabase *)db {
     
     Class selfClass = [self class];
     NSMutableString *sql = [NSMutableString stringWithFormat:@"insert into %@", [selfClass tableName]];
@@ -250,6 +333,17 @@ typedef NS_ENUM(NSInteger, FOPropertyType) {
         
         objc_property_t property = properties[i];
         NSString *propName = [NSString stringWithUTF8String:property_getName(property)];
+        id propValue = [self valueForKey:propName];
+        
+        if (!propValue) {
+            if (i == outCount - 1) {
+                [sqlCols appendFormat:@")"];
+                [sqlVals appendFormat:@");"];
+            }
+            continue;
+        }
+        
+        [args addObject:propValue];
         
         if (i == 0) {
             
@@ -266,8 +360,6 @@ typedef NS_ENUM(NSInteger, FOPropertyType) {
             [sqlCols appendFormat:@", %@)", propName];
             [sqlVals appendFormat:@", ?);"];
         }
-        
-        [args addObject:[self valueForKey:propName]];
     }
     free(properties);
     
@@ -315,6 +407,23 @@ typedef NS_ENUM(NSInteger, FOPropertyType) {
     }
     
     return result;
+}
+
+-(BOOL)persist:(FMDatabase *)db {
+    
+    if (!_persistentObj) {
+        
+        [self loadPersistentObj:db];
+    }
+    
+    if (_persistentObj) {
+        
+        return [self update:db];
+    }
+    else {
+        
+        return [self insert:db];
+    }
 }
 
 -(NSString *)description {
